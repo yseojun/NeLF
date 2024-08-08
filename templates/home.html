@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/nomalize.css') }}">
+
+    <title>Image Viewer</title>
+</head>
+<body>
+    <div class="main">
+        <div class="main-form">
+            <form id="inputForm">
+                <input type="button" value="Generate" onclick="requestNewImage()">
+                <input type="button" value="Auto Generate" onclick="generateAutomaticImages()">
+                <div class="input-box">
+                    <label for="x"> X:</label>
+                    <input type="number" id="x" name="x" step="any" value="0">
+                </div>
+                <div class="input-box">
+                    <label for="y"> Y:</label>
+                    <input type="number" id="y" name="y" step="any" value="0">
+                </div>
+                <div class="input-box">
+                    <label for="z"> Z:</label>
+                    <input type="number" id="z" name="z" step="any" value="0">
+                </div>
+                <div class="input-box">
+                    <label for="yaw">Yaw:</label>
+                    <input type="number" id="yaw" name="yaw" step="any" value="0">
+                </div>
+                <div class="input-box">
+                    <label for="pitch">Pitch:</label>
+                    <input type="number" id="pitch" name="pitch" step="any" value="0">
+                </div>
+            </form>
+            <!--
+            <h4>Depth : <span id="depth"> - </span></h4>
+            <h4>Width : <span id="width"> - </span></h4>
+            <h4>Gen Time : <span id="time_val"> - </span></h4>
+            <h4>Avg Time : <span id="avg_time"> - </span></h4>
+            -->
+        </div>
+            
+        <div class="main-image" id="image-container">
+            <img id="image" alt="Image" src="../static/generated_image.png">
+            <div class="mouse-cursor" id="mouse-cursor"></div>
+        </div>
+    </div>
+    
+    <script type="module" src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/3.0.4/socket.io.js"></script>
+    <script type="module" src="{{ url_for('static', filename='socketConnection.js') }}"></script>
+    <script type="module" src="{{ url_for('static', filename='Camera.js') }}"></script>
+    <script type="module" src="{{ url_for('static', filename='eventHandlers.js') }}"></script>
+    <script type="module" src="{{ url_for('static', filename='imageRequest.js') }}"></script>
+    <script type="module" src="{{ url_for('static', filename='imageUpdate.js') }}"></script>
+    <script type="module" src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>

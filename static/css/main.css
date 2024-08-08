@@ -1,0 +1,77 @@
+input[type="number"] {
+    padding: 3px;
+    font-size: 15px;
+    border: 1px solid black;
+    border-radius: 5px;
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    width:50%;
+    box-sizing: border-box;
+}
+
+input[type="button"] {
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    width:80%;
+    padding: 2px;
+    box-sizing: border-box;
+}
+
+.main {
+    display: block;
+    margin: 0 auto; /* 좌우 중앙 정렬 */
+    margin-top: 10px;
+    width: 80%;
+}
+
+.main-form {
+    display: block;
+    margin-bottom: 10px;
+    margin-left: auto;
+    margin-right: auto;
+    width: 30%;
+    float: left;
+}
+
+
+.main-image {
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    width: 70%;
+    float: left;
+}
+
+.input-box {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.input-box lable{
+    flex: 0 0 30%;
+    text-align: right;
+    padding-right: 10px;
+}
+
+.input-box input[type=number] {
+    flex: 0 0 70%;
+}
+
+.mouse_cursor {
+    width: 1px;
+    height: 1px;
+    position: absolute;
+    top: 50%; /* 가운데 정렬 */
+    left: 50%; /* 가운데 정렬 */
+    background-color: transparent;
+    pointer-events: none; /* 이 요소는 마우스 이벤트를 받지 않음 */
+    z-index: 999; /* 이미지 위에 배치 */
+    display: none;
+}
+
+.image-contatiner {
+    cursor: auto;
+}
