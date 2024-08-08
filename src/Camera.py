@@ -131,10 +131,13 @@ class Camera:
             theta = np.linspace(-np.tan(fov_rad/2)*aspect_ratio, np.tan(fov_rad/2)*aspect_ratio, W)
         
         theta, phi = np.meshgrid(theta, phi)
+
+        theta_tmp = np.radians(self.theta)
+        phi_tmp = np.radians(self.phi)
         
-        theta_rotated = theta * np.cos(np.radians(self.theta)) - np.sin(np.radians(self.theta))
-        z_component = theta * np.sin(np.radians(self.theta)) + np.cos(np.radians(self.theta))
-        phi_rotated = phi * np.cos(np.radians(self.phi)) - z_component * np.sin(np.radians(self.phi))
+        theta_rotated = theta * np.cos(theta_tmp) - np.sin(theta_tmp)
+        z_component = theta * np.sin(theta_tmp) + np.cos(theta_tmp)
+        phi_rotated = phi * np.cos(phi_tmp) - z_component * np.sin(phi_tmp)
 
         fov_array = np.stack([theta_rotated, phi_rotated], axis=-1)
 
