@@ -42,6 +42,7 @@ parser.add_argument('--data_dir',type=str,
                     default = 'dataset/Ollie/',help='data folder name')
 parser.add_argument('--gpuid',type=str, default = '0',help='data folder name')
 parser.add_argument('--mlp_depth', type=int, default = 8)
+parser.add_argument('--mlp_width', type=int, default = 256)
 parser.add_argument('--scale', type=int, default = 4)
 parser.add_argument('--img_form',type=str, default = '.png',help = 'exp name')
 

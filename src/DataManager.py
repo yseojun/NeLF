@@ -10,10 +10,15 @@ class DataManager:
         self.grid_size = grid_size
         
         self.uvst_data, self.rgb_data = self.load_data()
-        self.knn_st = NearestNeighbors(n_neighbors=1)
+        
+        # 기존 1개의 최근접 이웃용 KNN
+        self.knn_st_1 = NearestNeighbors(n_neighbors=1)
+        self.knn_fov_1 = NearestNeighbors(n_neighbors=1)
+        
+        # 새로운 4개의 최근접 이웃용 KNN
+        self.knn_st_4 = NearestNeighbors(n_neighbors=4)
+        
         self.preprocess()
-
-        self.knn_fov = NearestNeighbors(n_neighbors=1)
         self.calculate_data_fov()
 
     def load_data(self):
@@ -55,7 +60,12 @@ class DataManager:
         
         self.uvst_data = tmp_uvst
         self.rgb_data = tmp_rgb
-        self.knn_st.fit(st_values)
+        
+        # 1개의 최근접 이웃용 KNN 학습
+        self.knn_st_1.fit(st_values)
+        
+        # 4개의 최근접 이웃용 KNN 학습
+        self.knn_st_4.fit(st_values)
         
         print("데이터 전처리 완료.")
 
@@ -78,37 +88,70 @@ class DataManager:
         fov_array = np.stack([theta, phi], axis=-1)
         fov_array = fov_array.reshape(-1, 2)
 
-        self.knn_fov.fit(fov_array)
-        return fov_array
+        # 1개의 최근접 이웃용 KNN 학습
+        self.knn_fov_1.fit(fov_array)
         
-    def find_nearest_st_arr(self, st_arr):
-        distances, indices = self.knn_st.kneighbors(st_arr)
+        return fov_array
+            
+    def find_nearest_st_arr_1(self, st_arr):
+        distances, indices = self.knn_st_1.kneighbors(st_arr)
         return indices
     
-    def match_output_to_data_fov(self, output_fov):
-        # print("Output FOV를 Data FOV와 매칭 중...")
+    def find_nearest_st_arr_4(self, st_arr):
+        distances, indices = self.knn_st_4.kneighbors(st_arr)
+        return distances, indices
+
+    def match_output_to_data_fov_1(self, output_fov):
+        # print("Output FOV를 Data FOV와 매칭 중 (1 NN)...")
         output_fov_flat = output_fov.reshape(-1, 2)
-        distances, indices = self.knn_fov.kneighbors(output_fov_flat)
-        # print("FOV 매칭 완료.")
+        distances, indices = self.knn_fov_1.kneighbors(output_fov_flat)
+        # print("FOV 매칭 완료 (1 NN).")
         return indices
 
-    def get_matched_rgb(self, st_arr, output_fov):
+    def get_matched_rgb_1(self, st_arr, output_fov):
         H, W = output_fov.shape[:2]
         pixels_per_image = self.image_size[0] * self.image_size[1]
         
-        # print("nearest st 찾는 중...")
-        image_indices = self.find_nearest_st_arr(st_arr)
+        # 1개의 최근접 이웃 찾기
+        image_indices = self.find_nearest_st_arr_1(st_arr)
+        pixel_coords = self.match_output_to_data_fov_1(output_fov)
         
-        # print("fov 매칭 중...")
-        pixel_coords = self.match_output_to_data_fov(output_fov)
+        # 인덱스 계산
+        indices = image_indices.flatten() * pixels_per_image + pixel_coords.flatten()
         
-        # print("index 계산 중...")
-        indices = image_indices * pixels_per_image + pixel_coords
+        # RGB 데이터 추출
+        matched_rgb = self.rgb_data[indices].reshape(H, W, 3)
+        # matched_rgb = 1 - matched_rgb  # 기존 처리 유지
         
-        # print("rgb 데이터 추출 중...")
-        matched_rgb = self.rgb_data[indices]
-        matched_rgb = 1 - matched_rgb
-        matched_rgb = matched_rgb.reshape(H, W, 3)
-        
-        # print("RGB 데이터 추출 완료.")
         return matched_rgb
+
+    def get_matched_rgb_4(self, st_arr, output_fov):
+        H, W = output_fov.shape[:2]
+        pixels_per_image = self.image_size[0] * self.image_size[1]
+        
+        # 4개의 최근접 이웃 찾기
+        st_distances, image_indices = self.find_nearest_st_arr_4(st_arr)  # shape: (H*W, 4)
+        
+        # 1개의 FOV 매칭 사용, 동일한 값을 4번 반복
+        pixel_coords = self.match_output_to_data_fov_1(output_fov)       # shape: (H*W,)
+        pixel_coords = np.repeat(pixel_coords, 4)                       # shape: (H*W * 4,)
+        image_indices = image_indices.flatten()                          # shape: (H*W * 4,)
+        st_distances = st_distances.flatten()                            # shape: (H*W * 4,)
+        
+        # 인덱스 계산
+        indices = image_indices * pixels_per_image + pixel_coords       # shape: (H*W * 4,)
+        
+        # RGB 데이터 추출
+        matched_rgb = self.rgb_data[indices].reshape(H * W, 4, 3)       # shape: (H*W, 4, 3)
+        
+        # 가중치 계산: 거리의 역수를 가중치로 사용
+        weights = 1 / st_distances                                        # shape: (H*W * 4,)
+        
+        # 가중치 정규화: 각 픽셀마다 가중치의 합이 1이 되도록
+        weights = weights.reshape(H * W, 4)
+        weights /= weights.sum(axis=1, keepdims=True)                   # shape: (H*W, 4)
+        
+        # 가중 합산
+        weighted_rgb = (matched_rgb * weights[..., np.newaxis]).sum(axis=1)  # shape: (H*W, 3)
+        
+        return weighted_rgb.reshape(H, W, 3)
