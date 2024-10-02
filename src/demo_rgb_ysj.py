@@ -92,7 +92,7 @@ class demo_rgb():
         data_img = os.path.join(args.data_dir,'images_{}'.format(args.scale)) 
 
         self.exp = 'Exp_'+args.exp_name
-        self.checkpoints = 'result/'+self.exp+'/checkpoints/'
+        self.checkpoints = '/data/ysj/neulf_result/'+self.exp+'/checkpoints/'
 
         self.img_folder_test = 'demo_result_rgb/'+self.exp+'/'
         rm_folder(self.img_folder_test)
@@ -261,7 +261,7 @@ class demo_rgb():
                 print(ckpt_path)
                 ckpt_id = int(os.path.basename(ckpt_path).split(".")[0].split("-")[1])
                 self.iter = max(self.iter, ckpt_id)
-            ckpt_name = f"./{self.checkpoints}/nelf-{self.iter}.pth"
+            ckpt_name = f"{self.checkpoints}/nelf-{self.iter}.pth"
         print(f"Load weights from {ckpt_name}")
         
         ckpt = torch.load(ckpt_name)
