@@ -130,28 +130,27 @@ class DataManager:
         pixels_per_image = self.image_size[0] * self.image_size[1]
         
         # 4개의 최근접 이웃 찾기
-        st_distances, image_indices = self.find_nearest_st_arr_4(st_arr)  # shape: (H*W, 4)
+        st_distances, image_indices = self.find_nearest_st_arr_4(st_arr)
         
         # 1개의 FOV 매칭 사용, 동일한 값을 4번 반복
-        pixel_coords = self.match_output_to_data_fov_1(output_fov)       # shape: (H*W,)
-        pixel_coords = np.repeat(pixel_coords, 4)                       # shape: (H*W * 4,)
-        image_indices = image_indices.flatten()                          # shape: (H*W * 4,)
-        st_distances = st_distances.flatten()                            # shape: (H*W * 4,)
+        pixel_coords = self.match_output_to_data_fov_1(output_fov)
+        pixel_coords = np.repeat(pixel_coords, 4)
+        image_indices = image_indices.flatten()
+        st_distances = st_distances.flatten()
         
         # 인덱스 계산
-        indices = image_indices * pixels_per_image + pixel_coords       # shape: (H*W * 4,)
+        indices = image_indices * pixels_per_image + pixel_coords       
         
         # RGB 데이터 추출
-        matched_rgb = self.rgb_data[indices].reshape(H * W, 4, 3)       # shape: (H*W, 4, 3)
+        matched_rgb = self.rgb_data[indices].reshape(H * W, 4, 3)
         
         # 가중치 계산: 거리의 역수를 가중치로 사용
-        weights = 1 / st_distances                                        # shape: (H*W * 4,)
+        weights = 1 / st_distances                                        
         
-        # 가중치 정규화: 각 픽셀마다 가중치의 합이 1이 되도록
+        # 가중치 정규화
         weights = weights.reshape(H * W, 4)
-        weights /= weights.sum(axis=1, keepdims=True)                   # shape: (H*W, 4)
+        weights /= weights.sum(axis=1, keepdims=True)                 
         
-        # 가중 합산
-        weighted_rgb = (matched_rgb * weights[..., np.newaxis]).sum(axis=1)  # shape: (H*W, 3)
+        weighted_rgb = (matched_rgb * weights[..., np.newaxis]).sum(axis=1)
         
         return weighted_rgb.reshape(H, W, 3)

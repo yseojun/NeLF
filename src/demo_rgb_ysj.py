@@ -63,6 +63,25 @@ parser.add_argument('--mlp_width', type=int, default = 256)
 parser.add_argument('--scale', type=int, default = 4)
 parser.add_argument('--img_form',type=str, default = '.png',help = 'exp name')
 
+def compare_and_save_diff(img1, img2, frame_num, savename, name1, name2):
+    diff = np.abs(img1.astype(np.int16) - img2.astype(np.int16))
+    if np.any(diff > 0):
+        tqdm.write(f'프레임 {frame_num}: {name1}와 {name2} 사이에 색상 차이 발견')
+        max_diff = np.max(diff)
+        avg_diff = np.mean(diff)
+        tqdm.write(f'  최대 차이: {max_diff}, 평균 차이: {avg_diff:.2f}')
+        
+        max_diff_pos = np.unravel_index(np.argmax(diff), diff.shape)
+        tqdm.write(f'  최대 차이 위치: {max_diff_pos}')
+        tqdm.write(f'  {name1} 값: {img1[max_diff_pos]}')
+        tqdm.write(f'  {name2} 값: {img2[max_diff_pos]}')
+        
+        diff_image = np.clip(diff * 10, 0, 255).astype(np.uint8)
+        diff_colored = cv2.applyColorMap(diff_image, cv2.COLORMAP_JET)
+        cv2.imwrite(f"{savename}/{frame_num}_{name1}_vs_{name2}_diff.png", diff_colored)
+        return diff_colored
+    return 
+
 class demo_rgb():
     def __init__(self,args):
         os.environ["CUDA_VISIBLE_DEVICES"] = args.gpuid
@@ -111,7 +130,7 @@ class demo_rgb():
         self.knn = NearestNeighbors(n_neighbors=1)
         self.knn.fit(self.camera_pose)
         self.data_root = data_root
-
+        
 
     def gen_pose_llff(self):
         savename = f"{self.img_folder_test}/llff_pose"
@@ -121,99 +140,104 @@ class demo_rgb():
         view_group_data = []
         view_group_data_4 = []
 
-        # 데이터셋 세팅 : (data_root, grid_size, image_size)
         self.datamanager = DataManager(base_path=self.data_root, grid_size=17, image_size=(256, 512))
-
-        # 결과 카메라 세팅 : (x, y, z, theta, phi, fov, H, W)
-        self.cam = Camera(x=0, y=0, z=-1, theta=0, phi=0, fov=90, H=256, W=512)
+        self.cam = Camera(x=0, y=0, z=0, theta=-10, phi=0, fov=90, H=256, W=512)
 
         model_times = []
         dataset_times = []
         dataset_times_4 = []
 
         with torch.no_grad():
-            for i in tqdm(range(60), desc="Processing frames"):
+            for i in tqdm(range(60), desc="프레임 처리 중"):
                 self.cam.set_c2w()
-                self.cam.z += 2/60
+                self.cam.theta += 20/60
 
                 # 모델 코드
-                model_start = time.time()
-                data_uvst = self.cam.get_uvst()
-                view_unit = self.render_sample_img(self.model, data_uvst, self.w, self.h, None, None, False)                
-                view_unit *= 255           
-                view_unit = view_unit.cpu().numpy().astype(np.uint8)
-
-                view_unit = imageio.core.util.Array(view_unit)
-                view_group.append(view_unit)
-                model_end = time.time()
-                model_time = model_end - model_start
+                model_time, view_unit = self.run_model_save_img(i, savename)
                 model_times.append(model_time)
+                view_group.append(view_unit)
 
-                # 모델 - 이미지 저장
-                cv2.imwrite(savename+"/"+str(i)+".png", cv2.cvtColor(view_unit,cv2.COLOR_RGB2BGR))
-                tqdm.write(f'Frame {i} from model: {model_time:.4f} s')
-
-                # 데이터셋 코드
-                dataset_start = time.time()
-                st = data_uvst[:, 2:4]
-                output_fov = self.cam.get_output_fov()
-
-                view_data_unit = self.datamanager.get_matched_rgb_1(st, output_fov)
-                view_data_unit = (view_data_unit * 255).astype(np.uint8)
-                dataset_end = time.time()
-                dataset_time = dataset_end - dataset_start
+                # 데이터셋 코드 (1-NN)
+                dataset_time, view_data_unit = self.run_data_save_img(i, savename)
                 dataset_times.append(dataset_time)
-                tqdm.write(f'Frame {i} from dataset: {dataset_time:.4f} s')
-                cv2.imwrite(savename+"/"+str(i)+"_data.png", cv2.cvtColor(view_data_unit,cv2.COLOR_RGB2BGR))
-                
-                view_data_unit = imageio.core.util.Array(view_data_unit)
                 view_group_data.append(view_data_unit)
 
-                # --------------------------
                 # 데이터셋 코드 (4-NN)
-                dataset_start_4 = time.time()
-                view_data_unit_4 = self.datamanager.get_matched_rgb_4(st, output_fov)
-                view_data_unit_4 = (view_data_unit_4 * 255).astype(np.uint8)
-                dataset_end_4 = time.time()
-                dataset_time_4 = dataset_end_4 - dataset_start_4
+                dataset_time_4, view_data_unit_4 = self.run_data_save_img_point_4(i, savename)
                 dataset_times_4.append(dataset_time_4)
-                tqdm.write(f'Frame {i} from dataset (4-NN): {dataset_time_4:.4f} s')
-                cv2.imwrite(savename+"/"+str(i)+"_data_4.png", cv2.cvtColor(view_data_unit_4,cv2.COLOR_RGB2BGR))
-                
-                view_data_unit_4 = imageio.core.util.Array(view_data_unit_4)
                 view_group_data_4.append(view_data_unit_4)
-                
-                # 색상 차이 비교
-                diff = np.abs(view_data_unit.astype(np.int16) - view_data_unit_4.astype(np.int16))
-                if np.any(diff > 0):
-                    tqdm.write(f'Frame {i}: 색상 차이 발견')
-                    max_diff = np.max(diff)
-                    avg_diff = np.mean(diff)
-                    tqdm.write(f'  최대 차이: {max_diff}, 평균 차이: {avg_diff:.2f}')
-                    
-                    # 차이가 가장 큰 픽셀의 위치와 값 출력
-                    max_diff_pos = np.unravel_index(np.argmax(diff), diff.shape)
-                    tqdm.write(f'  최대 차이 위치: {max_diff_pos}')
-                    tqdm.write(f'  1-NN 값: {view_data_unit[max_diff_pos]}')
-                    tqdm.write(f'  4-NN 값: {view_data_unit_4[max_diff_pos]}')
-                    
-                    # 차이 이미지 저장
-                    diff_image = np.clip(diff * 10, 0, 255).astype(np.uint8)  # 차이를 강조하기 위해 10을 곱함
-                    cv2.imwrite(savename+"/"+str(i)+"_diff.png", cv2.applyColorMap(diff_image, cv2.COLORMAP_JET))
 
-            avg_model_time = statistics.mean(model_times)
-            avg_dataset_time = statistics.mean(dataset_times)
-            avg_dataset_time_4 = statistics.mean(dataset_times_4)
-            print(f"모델 inference 평균 : {avg_model_time:.4f} s")
-            print(f"데이터셋 평균 : {avg_dataset_time:.4f} s")
-            print(f"데이터셋 4포인트 가중치 평균 : {avg_dataset_time_4:.4f} s")
+            # 평균 시간 계산 및 출력
+            self.print_average_times(model_times, dataset_times, dataset_times_4)
 
             # gif 저장
-            imageio.mimsave(savename+".gif", view_group,fps=30)
-            imageio.mimsave(savename+"_data.gif", view_group_data,fps=30)
-            imageio.mimsave(savename+"_data_4.gif", view_group_data_4, fps=30)
+            self.save_gifs(savename, view_group, view_group_data, view_group_data_4)
 
+    # 모델 inference
+    def run_model_save_img(self, frame_num, savename):
+        start_time = time.time()
+        data_uvst = self.cam.get_uvst()
+        view_unit = self.render_sample_img(self.model, data_uvst, self.w, self.h, None, None, False)                
+        view_unit = (view_unit * 255).cpu().numpy().astype(np.uint8)
+        view_unit = imageio.core.util.Array(view_unit)
+        
+        cv2.imwrite(f"{savename}/{frame_num}.png", cv2.cvtColor(view_unit, cv2.COLOR_RGB2BGR))
+        
+        end_time = time.time()
+        model_time = end_time - start_time
+        tqdm.write(f'Frame {frame_num} from model: {model_time:.4f} s')
+        
+        return model_time, view_unit
 
+    # 데이터셋 1 point
+    def run_data_save_img(self, frame_num, savename):
+        start_time = time.time()
+        data_uvst = self.cam.get_uvst()
+        st = data_uvst[:, 2:4]
+        output_fov = self.cam.get_output_fov()
+
+        view_data_unit = self.datamanager.get_matched_rgb_1(st, output_fov)
+        view_data_unit = (view_data_unit * 255).astype(np.uint8)
+        
+        cv2.imwrite(f"{savename}/{frame_num}_data.png", cv2.cvtColor(view_data_unit, cv2.COLOR_RGB2BGR))
+        
+        end_time = time.time()
+        dataset_time = end_time - start_time
+        tqdm.write(f'Frame {frame_num} from dataset: {dataset_time:.4f} s')
+        
+        return dataset_time, imageio.core.util.Array(view_data_unit)
+
+    # 데이터셋 4 point
+    def run_data_save_img_point_4(self, frame_num, savename):
+        start_time = time.time()
+        data_uvst = self.cam.get_uvst()
+        st = data_uvst[:, 2:4]
+        output_fov = self.cam.get_output_fov()
+
+        view_data_unit_4 = self.datamanager.get_matched_rgb_4(st, output_fov)
+        view_data_unit_4 = (view_data_unit_4 * 255).astype(np.uint8)
+        
+        cv2.imwrite(f"{savename}/{frame_num}_data_4.png", cv2.cvtColor(view_data_unit_4, cv2.COLOR_RGB2BGR))
+        
+        end_time = time.time()
+        dataset_time_4 = end_time - start_time
+        tqdm.write(f'Frame {frame_num} from dataset (4-NN): {dataset_time_4:.4f} s')
+        
+        return dataset_time_4, imageio.core.util.Array(view_data_unit_4)
+
+    def print_average_times(self, model_times, dataset_times, dataset_times_4):
+        avg_model_time = statistics.mean(model_times)
+        avg_dataset_time = statistics.mean(dataset_times)
+        avg_dataset_time_4 = statistics.mean(dataset_times_4)
+        print()
+        print(f"모델 inference 평균 : {avg_model_time:.4f} s")
+        print(f"데이터셋 평균 : {avg_dataset_time:.4f} s")
+        print(f"데이터셋 4포인트 가중치 평균 : {avg_dataset_time_4:.4f} s")
+
+    def save_gifs(self, savename, view_group, view_group_data, view_group_data_4):
+        imageio.mimsave(f"{savename}.gif", view_group, fps=30)
+        imageio.mimsave(f"{savename}_data.gif", view_group_data, fps=30)
+        imageio.mimsave(f"{savename}_data_4.gif", view_group_data_4, fps=30)
 
     def render_sample_img(self,model,uvst, w, h, save_path=None,save_depth_path=None,save_flag=True):
          with torch.no_grad():
@@ -228,7 +252,6 @@ class demo_rgb():
                 torchvision.utils.save_image(pred_img, save_path)
             
             return pred_color.reshape((h,w,3))
-
         
     def load_check_points(self):
         ckpt_paths = glob.glob(self.checkpoints+"*.pth")
@@ -251,4 +274,3 @@ if __name__ == '__main__':
 
     unit = demo_rgb(args)
     unit.gen_pose_llff()
-
