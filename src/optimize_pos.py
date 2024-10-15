@@ -84,15 +84,15 @@ def compare_and_save_diff(img1, img2, frame_num, savename, name1, name2):
 
 def print_model_times(model_times):
     avg_model_time = statistics.mean(model_times)
-    print(f"모델 inference 평균 : {avg_model_time*1000:.2f} ms")
+    print(f"모델 inference 평균 : {avg_model_time:.4f} s")
 
 def print_dataset_times(dataset_times):
     avg_dataset_time = statistics.mean(dataset_times)
-    print(f"데이터셋 평균 : {avg_dataset_time*1000:.2f} ms")
+    print(f"데이터셋 평균 : {avg_dataset_time:.4f} s")
 
 def print_dataset4_times(dataset_times_4):
     avg_dataset_time_4 = statistics.mean(dataset_times_4)
-    print(f"데이터셋 4포인트 가중치 평균 : {avg_dataset_time_4*1000:.2f} ms")
+    print(f"데이터셋 4포인트 가중치 평균 : {avg_dataset_time_4:.4f} s")
 
 def save_model_gif(savename, view_group):
     imageio.mimsave(f"{savename}_model.gif", view_group, fps=30)
@@ -161,23 +161,21 @@ class demo_rgb():
         view_group_data = []
         view_group_data_4 = []
 
-        N = 10
         self.datamanager = DataManager(base_path=self.data_root, grid_size=17, image_size=(256, 512))
-        self.cam = Camera(x=0, y=0, z=-1, theta=-10, phi=0, fov=90, H=256, W=512)
+        self.cam = Camera(x=0, y=0, z=-1, theta=0, phi=0, fov=90, H=256, W=512)
 
         model_times = []
         dataset_times = []
         dataset_times_4 = []
 
         with torch.no_grad():
-            for i in tqdm(range(N), desc="프레임 처리 중"):
+            for i in tqdm(range(60), desc="프레임 처리 중"):
                 self.cam.set_c2w()
-                self.cam.theta += 20/N
-                self.cam.z += 2/N
+                self.cam.z += 2/60
 
                 # 모델 코드
-                model_time, view_unit = self.run_model_save_img(i, savename)
-                model_times.append(model_time)
+                view_unit = self.run_model_save_img(i, savename)
+                # model_times.append(model_time)
                 view_group.append(view_unit)
 
                 # # 데이터셋 코드 (1-NN)
@@ -186,39 +184,33 @@ class demo_rgb():
                 # view_group_data.append(view_data_unit)
 
                 # 데이터셋 코드 (4-NN)
-                # dataset_time_4, view_data_unit_4 = self.run_data_save_img_point_4(i, savename)
+                view_data_unit_4 = self.run_data_save_img_point_4(i, savename)
                 # dataset_times_4.append(dataset_time_4)
-                # view_group_data_4.append(view_data_unit_4)
+                view_group_data_4.append(view_data_unit_4)
 
             # 평균 시간 계산 및 출력
-            print_model_times(model_times)
+            # print_model_times(model_times)
             # print_dataset_times(dataset_times)
             # print_dataset4_times(dataset_times_4)
 
             # gif 저장
             save_model_gif(savename, view_group)
             # save_dataset_gif(savename, view_group_data)
-            # save_dataset4_gif(savename, view_group_data_4)
+            save_dataset4_gif(savename, view_group_data_4)
 
     # 모델 inference
     def run_model_save_img(self, frame_num, savename):
         data_uvst = self.cam.get_uvst()
-        # start_time = time.time()
         view_unit = self.render_sample_img(self.model, data_uvst, self.w, self.h, None, None, False)                
-        # end_time = time.time()
         view_unit = (view_unit * 255).cpu().numpy().astype(np.uint8)
         view_unit = imageio.core.util.Array(view_unit)
         
         cv2.imwrite(f"{savename}/{frame_num}.png", cv2.cvtColor(view_unit, cv2.COLOR_RGB2BGR))
         
-        # model_time = end_time - start_time
-        # tqdm.write(f'Frame {frame_num} from model: {model_time*1000:.2f} ms')
-        model_time = 0
-        return model_time, view_unit
+        return view_unit
 
     # 데이터셋 1 point
     def run_data_save_img(self, frame_num, savename):
-        start_time = time.time()
         data_uvst = self.cam.get_uvst()
         st = data_uvst[:, 2:4]
         output_fov = self.cam.get_output_fov()
@@ -228,15 +220,10 @@ class demo_rgb():
         
         cv2.imwrite(f"{savename}/{frame_num}_data.png", cv2.cvtColor(view_data_unit, cv2.COLOR_RGB2BGR))
         
-        end_time = time.time()
-        dataset_time = end_time - start_time
-        tqdm.write(f'Frame {frame_num} from dataset: {dataset_time*1000:.2f} ms')
-        
-        return dataset_time, imageio.core.util.Array(view_data_unit)
+        return imageio.core.util.Array(view_data_unit)
 
     # 데이터셋 4 point
     def run_data_save_img_point_4(self, frame_num, savename):
-        start_time = time.time()
         data_uvst = self.cam.get_uvst()
         st = data_uvst[:, 2:4]
         output_fov = self.cam.get_output_fov()
@@ -246,27 +233,16 @@ class demo_rgb():
         
         cv2.imwrite(f"{savename}/{frame_num}_data_4.png", cv2.cvtColor(view_data_unit_4, cv2.COLOR_RGB2BGR))
         
-        end_time = time.time()
-        dataset_time_4 = end_time - start_time
-        tqdm.write(f'Frame {frame_num} from dataset (4-NN): {dataset_time_4*1000:.2f} ms')
-        
-        return dataset_time_4, imageio.core.util.Array(view_data_unit_4)
+        return imageio.core.util.Array(view_data_unit_4)
 
     def render_sample_img(self,model,uvst, w, h, save_path=None,save_depth_path=None,save_flag=True):
          with torch.no_grad():
-            start_time = torch.cuda.Event(enable_timing=True)
-            end_time = torch.cuda.Event(enable_timing=True)
         
             uvst = torch.from_numpy(uvst.astype(np.float32)).cuda()
-            start_time.record()
+
             pred_color = model(uvst)
-            end_time.record()
   
             pred_img = pred_color.reshape((h,w,3)).permute((2,0,1))
-
-            inf_time = start_time.elapsed_time(end_time)
-            tqdm.write(f'{inf_time} ms')
-            
 
             if(save_flag):
                 torchvision.utils.save_image(pred_img, save_path)

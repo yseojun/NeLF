@@ -8,7 +8,7 @@ def convert_to_onnx(args):
     model = Nerf4D_relu_ps(D=args.mlp_depth, W=args.mlp_width, depth_branch=False)
     
     # Load the weights
-    checkpoints_dir = f'result/Exp_{args.exp_name}/checkpoints/'
+    checkpoints_dir = f'/data/ysj/neulf_result/Exp_{args.exp_name}/checkpoints/'
     latest_checkpoint = max(os.listdir(checkpoints_dir), key=lambda x: int(x.split('-')[1].split('.')[0]))
     checkpoint_path = os.path.join(checkpoints_dir, latest_checkpoint)
     
@@ -32,7 +32,7 @@ def convert_to_onnx(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--exp_name', type=str, default='Ollie_d8_w256', help='exp name')
+    parser.add_argument('--exp_name', type=str, default='', help='exp name')
     parser.add_argument('--mlp_depth', type=int, default=8)
     parser.add_argument('--mlp_width', type=int, default=256)
     args = parser.parse_args()

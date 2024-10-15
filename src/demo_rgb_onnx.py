@@ -36,6 +36,7 @@ from src.utils import get_rays_np
 import imageio
 from sklearn.neighbors import NearestNeighbors
 import time
+import onnxruntime
 
 parser = argparse.ArgumentParser() # museum,column2
 parser.add_argument('--exp_name',type=str, default = 'Ollie_d8_w256',help = 'exp name')
@@ -106,16 +107,12 @@ class demo_rgb():
         self.knn.fit(self.camera_pose)
 
     def gen_pose_llff(self):
-        
         savename = f"{self.img_folder_test}/llff_pose"
 
         fourcc = cv2.VideoWriter_fourcc(*'MP4V')
-        out   = cv2.VideoWriter(savename+".mp4", fourcc, 30.0, (self.w,self.h))
-        out_near   = cv2.VideoWriter(savename+"_near.mp4", fourcc, 30.0, (self.w,self.h))
+        out = cv2.VideoWriter(savename+".mp4", fourcc, 30.0, (self.w,self.h))
 
-        view_group       = []
-        view_group_depth = []
-        view_group_near  = []
+        view_group = []
 
         num_frame = self.render_pose.shape[0]
 
@@ -123,13 +120,6 @@ class demo_rgb():
             for i, c2w in enumerate(tqdm(self.render_pose)):
                 start_time = time.time()
                 ray_o, ray_d = get_rays_np(self.h, self.w, self.intrinsic, c2w)
-
-                # inference view camera translation
-                current_T = c2w[:3,-1].T
-                current_T = np.expand_dims(current_T,axis=0)
-
-                distance, neighbor_cam_index = self.knn.kneighbors(current_T)
-                neighbor_cam_index = neighbor_cam_index.item()
 
                 ray_o = np.reshape(ray_o,(-1,3))
                 ray_d = np.reshape(ray_d,(-1,3))
@@ -139,7 +129,6 @@ class demo_rgb():
                 p_uv = np.broadcast_to(np.array([0.0,0.0,self.uv_depth]),np.shape(ray_o))
                 p_st = np.broadcast_to(np.array([0.0,0.0,self.st_depth]),np.shape(ray_o))
 
-                # interset radius plane 
                 inter_uv = rayPlaneInter(plane_normal,p_uv,ray_o,ray_d)
                 inter_st = rayPlaneInter(plane_normal,p_st,ray_o,ray_d)
 
@@ -149,33 +138,76 @@ class demo_rgb():
                 
                 view_unit = self.render_sample_img(self.model,data_uvst,self.w,self.h,None,None,False)
                 
-                # view_unit_near = 0
-                view_unit_near = self.color_imgs[neighbor_cam_index,:,:,:].copy()
-
-                # unit
                 view_unit *= 255
-                view_unit_near *=255
            
-                view_unit       = view_unit.cpu().numpy().astype(np.uint8)
-                view_unit_near = view_unit_near.astype(np.uint8)
+                view_unit = view_unit.cpu().numpy().astype(np.uint8)
                 end_time = time.time()
                 rendering_time = end_time - start_time
                 rendering_times.append(rendering_time)
 
                 out.write(cv2.cvtColor(view_unit,cv2.COLOR_RGB2BGR))
-                out_near.write(cv2.cvtColor(view_unit_near,cv2.COLOR_RGB2BGR))
                 
-                view_unit       = imageio.core.util.Array(view_unit)
-                view_unit_near = imageio.core.util.Array(view_unit_near)
+                view_unit = imageio.core.util.Array(view_unit)
                 
                 view_group.append(view_unit)
-                view_group_near.append(view_unit_near)
 
             imageio.mimsave(savename+".gif", view_group,fps=30)
-            imageio.mimsave(savename+"_near.gif", view_group_near,fps=30)
             avg_rendering_time = np.mean(rendering_times)
             print(f"평균 렌더링 시간: {avg_rendering_time * 1000:.2f} 밀리초")
+            return avg_rendering_time
+
+    def gen_pose_llff_onnx(self):
+        savename = f"{self.img_folder_test}/llff_pose_onnx"
+
+        fourcc = cv2.VideoWriter_fourcc(*'MP4V')
+        out = cv2.VideoWriter(savename+".mp4", fourcc, 30.0, (self.w,self.h))
+
+        view_group = []
+
+        num_frame = self.render_pose.shape[0]
+        rendering_times_onnx = []
+
+        for i, c2w in enumerate(tqdm(self.render_pose)):
+            start_time = time.time()
+            ray_o, ray_d = get_rays_np(self.h, self.w, self.intrinsic, c2w)
+
+            ray_o = np.reshape(ray_o,(-1,3))
+            ray_d = np.reshape(ray_d,(-1,3))
+
+            plane_normal = np.broadcast_to(np.array([0.0,0.0,1.0]),ray_o.shape)
+
+            p_uv = np.broadcast_to(np.array([0.0,0.0,self.uv_depth]),np.shape(ray_o))
+            p_st = np.broadcast_to(np.array([0.0,0.0,self.st_depth]),np.shape(ray_o))
+
+            inter_uv = rayPlaneInter(plane_normal,p_uv,ray_o,ray_d)
+            inter_st = rayPlaneInter(plane_normal,p_st,ray_o,ray_d)
+
+            data_uvst = np.concatenate((inter_uv[:,:2],inter_st[:,:2]),1)
+
+            data_uvst = (data_uvst - self.uvst_min)/(self.uvst_max - self.uvst_min) * 2 -1.0
             
+            view_unit = self.render_sample_img_onnx(data_uvst, self.w, self.h)
+
+            view_unit *= 255
+       
+            view_unit = view_unit.astype(np.uint8)
+            
+            end_time = time.time()
+            rendering_time = end_time - start_time
+            rendering_times_onnx.append(rendering_time)
+
+            out.write(cv2.cvtColor(view_unit,cv2.COLOR_RGB2BGR))
+            
+            view_unit = imageio.core.util.Array(view_unit)
+            
+            view_group.append(view_unit)
+
+        imageio.mimsave(savename+".gif", view_group,fps=30)
+        
+        avg_rendering_time_onnx = np.mean(rendering_times_onnx)
+        print(f"ONNX 모델 평균 렌더링 시간: {avg_rendering_time_onnx * 1000:.2f} 밀리초")
+        
+        return avg_rendering_time_onnx
 
     def render_sample_img(self,model,uvst, w, h, save_path=None,save_depth_path=None,save_flag=True):
          with torch.no_grad():
@@ -208,11 +240,33 @@ class demo_rgb():
     
         self.model.load_state_dict(ckpt)
         
+    def load_onnx_model(self):
+        self.onnx_model = onnxruntime.InferenceSession(f"{self.exp}.onnx")
+
+    def render_sample_img_onnx(self, uvst, w, h):
+        uvst = uvst.astype(np.float32)
+        ort_inputs = {self.onnx_model.get_inputs()[0].name: uvst}
+        ort_outs = self.onnx_model.run(None, ort_inputs)
+        pred_color = ort_outs[0]
+        return pred_color.reshape((h,w,3))
+
+    def compare_inference_time(self):
+        self.load_onnx_model()
+        
+        print("PyTorch 모델로 렌더링 중...")
+        avg_time_pytorch = self.gen_pose_llff()
+        
+        print("ONNX 모델로 렌더링 중...")
+        avg_time_onnx = self.gen_pose_llff_onnx()
+        
+        print(f"\nPyTorch 모델 평균 렌더링 시간: {avg_time_pytorch * 1000:.2f} 밀리초")
+        print(f"ONNX 모델 평균 렌더링 시간: {avg_time_onnx * 1000:.2f} 밀리초")
+        print(f"속도 향상: {(avg_time_pytorch / avg_time_onnx - 1) * 100:.2f}%")
 
 if __name__ == '__main__':
 
     args = parser.parse_args()
 
     unit = demo_rgb(args)
-    unit.gen_pose_llff()
+    unit.compare_inference_time()
  

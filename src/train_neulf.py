@@ -50,6 +50,8 @@ from src.utils import get_rays_np
 from skimage.metrics import structural_similarity, peak_signal_noise_ratio
 import lpips
 
+import time
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--exp_name',type=str, default = 'Ollie_d8_w256',help = 'exp name')
 parser.add_argument('--data_dir',type=str, 
@@ -333,6 +335,8 @@ class train():
 
     def val(self,epoch):
         with torch.no_grad():
+            start_time = torch.cuda.Event(enable_timing=True)
+            end_time = torch.cuda.Event(enable_timing=True)
             i=0
             p = []
             s = []
@@ -347,7 +351,15 @@ class train():
                 uvst = self.uvst_whole_val[i:end]
                 uvst = torch.from_numpy(uvst.astype(np.float32)).cuda()
 
+                start_time.record()
                 pred_color = self.model(uvst)
+                end_time.record()
+
+                torch.cuda.synchronize()
+                
+                inf_time = start_time.elapsed_time(end_time)
+                print(inf_time)
+
                 gt_color = self.color_whole_val[i:end]
 
                 # write to file
