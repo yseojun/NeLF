@@ -36,7 +36,7 @@ import time
 from sklearn.neighbors import NearestNeighbors
 
 from Camera import Camera
-from DataManager import DataManager
+from src.DataManager_cuda import DataManager
 
 def rm_folder(path):
     if os.path.exists(path):
@@ -127,29 +127,6 @@ class demo_rgb():
         self.h = int(sample_img.shape[0])
         self.w = int(sample_img.shape[1])
 
-        self.uvst_whole   = np.load(f"{data_root}/uvsttrain.npy") 
-        self.uvst_min = self.uvst_whole.min()
-        self.uvst_max = self.uvst_whole.max()
-        self.color_whole   = np.load(f"{data_root}/rgbtrain.npy")
-
-        self.color_imgs = np.reshape(self.color_whole,(-1,self.h,self.w,3))
-
-        self.fdepth = np.load(f"{data_root}/fdepthtrain.npy")
-
-        rays_whole = np.concatenate([self.uvst_whole, self.color_whole], axis=1)
-       
-        # UV 평면, ST 평면 거리 세팅
-        self.uv_depth     = 1.0
-        self.st_depth     = -1.0
-       
-        self.render_pose  = np.load(f"{data_root}/Render_posetrain.npy")
-        self.intrinsic    = np.load(f"{data_root}/ktrain.npy")
-
-        self.camera_pose = np.load(f"{data_root}/cam_posetrain.npy") 
-        print(self.camera_pose.shape[0])
-
-        self.knn = NearestNeighbors(n_neighbors=1)
-        self.knn.fit(self.camera_pose)
         self.data_root = data_root
         
 
@@ -161,112 +138,86 @@ class demo_rgb():
         view_group_data = []
         view_group_data_4 = []
 
-        N = 10
-        self.datamanager = DataManager(base_path=self.data_root, grid_size=17, image_size=(256, 512))
-        self.cam = Camera(x=0, y=0, z=-1, theta=-10, phi=0, fov=90, H=256, W=512)
+        N = 20
+        self.datamanager = DataManager(base_path=self.data_root, grid_size=17, image_size=(512, 512))
+        self.cam = Camera(x=0, y=0, z=0, theta=0, phi=0, fov=90, H=512, W=512)
 
         model_times = []
-        dataset_times = []
         dataset_times_4 = []
 
         with torch.no_grad():
             for i in tqdm(range(N), desc="프레임 처리 중"):
                 self.cam.set_c2w()
-                self.cam.theta += 20/N
-                self.cam.z += 2/N
+                self.cam.x += 1/N
 
                 # 모델 코드
                 model_time, view_unit = self.run_model_save_img(i, savename)
                 model_times.append(model_time)
                 view_group.append(view_unit)
 
-                # # 데이터셋 코드 (1-NN)
-                # dataset_time, view_data_unit = self.run_data_save_img(i, savename)
-                # dataset_times.append(dataset_time)
-                # view_group_data.append(view_data_unit)
-
                 # 데이터셋 코드 (4-NN)
-                # dataset_time_4, view_data_unit_4 = self.run_data_save_img_point_4(i, savename)
-                # dataset_times_4.append(dataset_time_4)
-                # view_group_data_4.append(view_data_unit_4)
+                dataset_time_4, view_data_unit_4 = self.run_data_save_img_point_4(i, savename)
+                dataset_times_4.append(dataset_time_4)
+                view_group_data_4.append(view_data_unit_4)
 
             # 평균 시간 계산 및 출력
             print_model_times(model_times)
-            # print_dataset_times(dataset_times)
-            # print_dataset4_times(dataset_times_4)
+            print_dataset4_times(dataset_times_4)
 
             # gif 저장
             save_model_gif(savename, view_group)
-            # save_dataset_gif(savename, view_group_data)
-            # save_dataset4_gif(savename, view_group_data_4)
+            save_dataset4_gif(savename, view_group_data_4)
 
     # 모델 inference
     def run_model_save_img(self, frame_num, savename):
         data_uvst = self.cam.get_uvst()
-        # start_time = time.time()
+        
+        # CUDA 이벤트 생성
+        start_time = torch.cuda.Event(enable_timing=True)
+        end_time = torch.cuda.Event(enable_timing=True)
+        
+        start_time.record()
         view_unit = self.render_sample_img(self.model, data_uvst, self.w, self.h, None, None, False)                
-        # end_time = time.time()
+        end_time.record()
+        torch.cuda.synchronize()
+        
+        model_time = start_time.elapsed_time(end_time) / 1000  # ms를 초 단위로 변환
+        tqdm.write(f'프레임 {frame_num} 모델 추론 시간: {model_time*1000:.2f} ms')
+        
         view_unit = (view_unit * 255).cpu().numpy().astype(np.uint8)
         view_unit = imageio.core.util.Array(view_unit)
         
         cv2.imwrite(f"{savename}/{frame_num}.png", cv2.cvtColor(view_unit, cv2.COLOR_RGB2BGR))
         
-        # model_time = end_time - start_time
-        # tqdm.write(f'Frame {frame_num} from model: {model_time*1000:.2f} ms')
-        model_time = 0
         return model_time, view_unit
-
-    # 데이터셋 1 point
-    def run_data_save_img(self, frame_num, savename):
-        start_time = time.time()
-        data_uvst = self.cam.get_uvst()
-        st = data_uvst[:, 2:4]
-        output_fov = self.cam.get_output_fov()
-
-        view_data_unit = self.datamanager.get_matched_rgb_1(st, output_fov)
-        view_data_unit = (view_data_unit * 255).astype(np.uint8)
-        
-        cv2.imwrite(f"{savename}/{frame_num}_data.png", cv2.cvtColor(view_data_unit, cv2.COLOR_RGB2BGR))
-        
-        end_time = time.time()
-        dataset_time = end_time - start_time
-        tqdm.write(f'Frame {frame_num} from dataset: {dataset_time*1000:.2f} ms')
-        
-        return dataset_time, imageio.core.util.Array(view_data_unit)
 
     # 데이터셋 4 point
     def run_data_save_img_point_4(self, frame_num, savename):
-        start_time = time.time()
         data_uvst = self.cam.get_uvst()
         st = data_uvst[:, 2:4]
-        output_fov = self.cam.get_output_fov()
 
-        view_data_unit_4 = self.datamanager.get_matched_rgb_4(st, output_fov)
+        # CUDA 이벤트 생성
+        start_time = torch.cuda.Event(enable_timing=True)
+        end_time = torch.cuda.Event(enable_timing=True)
+        
+        start_time.record()
+        view_data_unit_4 = self.datamanager.get_matched_rgb_4(st)
+        end_time.record()
+        torch.cuda.synchronize()
+        
+        dataset_time_4 = start_time.elapsed_time(end_time) / 1000  # ms를 초 단위로 변환
+        tqdm.write(f'프레임 {frame_num} 데이터셋 처리 시간: {dataset_time_4*1000:.2f} ms')
+        
         view_data_unit_4 = (view_data_unit_4 * 255).astype(np.uint8)
-        
         cv2.imwrite(f"{savename}/{frame_num}_data_4.png", cv2.cvtColor(view_data_unit_4, cv2.COLOR_RGB2BGR))
-        
-        end_time = time.time()
-        dataset_time_4 = end_time - start_time
-        tqdm.write(f'Frame {frame_num} from dataset (4-NN): {dataset_time_4*1000:.2f} ms')
         
         return dataset_time_4, imageio.core.util.Array(view_data_unit_4)
 
     def render_sample_img(self,model,uvst, w, h, save_path=None,save_depth_path=None,save_flag=True):
-         with torch.no_grad():
-            start_time = torch.cuda.Event(enable_timing=True)
-            end_time = torch.cuda.Event(enable_timing=True)
-        
+        with torch.no_grad():
             uvst = torch.from_numpy(uvst.astype(np.float32)).cuda()
-            start_time.record()
             pred_color = model(uvst)
-            end_time.record()
-  
             pred_img = pred_color.reshape((h,w,3)).permute((2,0,1))
-
-            inf_time = start_time.elapsed_time(end_time)
-            tqdm.write(f'{inf_time} ms')
-            
 
             if(save_flag):
                 torchvision.utils.save_image(pred_img, save_path)
